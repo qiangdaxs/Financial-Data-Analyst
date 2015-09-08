@@ -3,6 +3,8 @@ import pandas as pd
 
 
 def main():
+    i=1
+
     pass
 
 # I am just adding one line
