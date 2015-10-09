@@ -1,0 +1,475 @@
+---
+title: "Programming Part"
+output: pdf_document
+---
+Problem 8
+```{r}
+rm(list=ls(all=TRUE))
+library(glmnet)
+library(ggplot2)
+library(base)
+library(reshape2)
+lambda_seq=seq(0.1,10,0.1)
+
+n = 500
+p = 10000
+beta <- rep(1,p)
+count = 100
+mse <-matrix(NA,100,100)
+ptm <- proc.time()
+for (i in 1:count) { 
+  x <- matrix(rnorm(n*p),n,p)
+  e <- matrix(rnorm(1*n),n,1)
+  y <- x%*%beta+e
+  beta_est <- glmnet(x,y,alpha=0,lambda=lambda_seq,intercept=FALSE)
+  mse[i,]  <- apply( (coef(beta_est)[-1,]-beta)^2,2,mean)
+}
+proc.time()-ptm
+###Plot the graph
+mse=apply(mse,2,mean)
+table <- data.frame("lambda"=lambda_seq,"mse"=mse)
+table <- melt(table,id="lambda")
+plt <- ggplot(table, aes(x=lambda,y=value,colour=variable))+
+  geom_line()+
+  labs(x="lambda",y="MSE",title="MSE vs lambda")
+plt
+```
+Problem 9
+```{r}
+rm(list=ls(all=TRUE))
+library(mnormt)
+library(leaps)
+library(ggplot2)
+sigma=matrix(0.85,31,31)
+diag(sigma)<-1
+mu=rep(0,31)
+
+
+########### Build the sample X#####################################
+fwd.mse<-matrix(NA,31,50)
+bwd.mse<-matrix(NA,31,50)
+best.mse<-matrix(NA,31,50)
+a<-matrix(NA,31,50)
+b<-matrix(NA,50)
+rho <- sqrt(0.85)
+#x <- matrix(NA,300,31)
+
+
+for (j in 1:50){
+  beta_2=rep(0,21)
+  beta_1=sqrt(0.4)*rnorm(10)
+  beta=c(beta_1,beta_2)
+  beta <-matrix(beta,31,1) 
+  
+  #z <- rmnorm(n=301,mean=mu,varcov=diag(1,31,31))
+  x=rmnorm(n=300,mean=mu,varcov=sigma)
+  ###for (n in 1:300){
+    ###x[n,] <- rho *z[1,] +sqrt(1-rho)*z[(n+1),]
+  ###}
+
+  e=sqrt(6.25)*rnorm(300)
+#e=matrix(sqrt(6.25)*rnorm(300))
+
+  y=x %*% beta+e
+########### Best Subset Selection #################################
+  regfit.fwd <- regsubsets(x=x,y=y,nvmax=31,method="forward")
+  regfit.bwd <- regsubsets(x=x,y=y,nvmax=31,method="backward")
+  regfit.best <- regsubsets(x=x,y=y,nvmax=31,method="exhaustive")
+  
+  select.fwd <- summary(regfit.fwd)$which
+  select.bwd <- summary(regfit.bwd)$which
+  select.best <- summary(regfit.best)$which
+  select.fwd <- select.fwd[,-1]
+  select.bwd <- select.bwd[,-1]
+  select.best <- select.best[,-1]
+  
+  fwd.beta_est=coef(regfit.fwd,1:31)
+  bwd.beta_est=coef(regfit.bwd,1:31)
+  best.beta_est=coef(regfit.best,1:31)
+  for (k in 1:31){
+    
+    #index = c("1","2","3","4","5","6","7","8","9","10")
+    
+    delta.fwd <- fwd.beta_est[[k]][-1]-beta[select.fwd[k,]]
+    delta.bwd <- bwd.beta_est[[k]][-1]-beta[select.bwd[k,]]
+    delta.best <- best.beta_est[[k]][-1]-beta[select.best[k,]]
+    
+    fwd.mse[k,j] <- (sum(delta.fwd^2))/k
+    bwd.mse[k,j] <- (sum(delta.bwd^2))/k
+    best.mse[k,j] <- (sum(delta.best^2))/k
+  }
+  
+
+  #a[,j] <- beta_est[-1]
+}
+fwd = apply(fwd.mse,1,mean)
+bwd = apply(bwd.mse,1,mean)
+best = apply(best.mse,1,mean)
+table <- data.frame("k"=1:31,"fwd"=fwd,"bwd"=bwd,"best"=best)
+library(reshape2)
+k_to_plot <- melt(table,id="k")
+plt <- ggplot(k_to_plot, aes(x=k,y=value,colour=variable))+
+  geom_line()+
+  labs(x="k",y="MSE",title="MSE of beta")
+
+plt
+```
+
+
+
+
+Problem 10 
+(a) Solution:
+```{r}
+setwd("/Users/qiangda/Documents/Financial Data Mining ")
+rm(list=ls(all=TRUE))
+load("hw1.RData")
+```
+Since this is a classification problem, we define the attribution as 1 or 0. Then, we load the data
+```{r}
+y.train <- c(rep(0,dim(train2)[1]),rep(1,dim(train3)[1]))
+x.train <-rbind(train2,train3)
+y.test <- c(rep(0,dim(test2)[1]),rep(1,dim(test3)[1]))
+x.test <- rbind(test2,test3)
+```
+OLS regression:
+```{r}
+ols <- lm(y.train~x.train)
+train_est <- predict(ols)
+train_est[train_est >=0.5] <- 1
+train_est[train_est <0.5] <- 0
+train_error <- mean(train_est != y.train) #The raio of incorrectness
+#Then we calculate the test error
+test_est <- cbind(1,x.test) %*% coef(ols)
+test_est[test_est >=0.5] <- 1
+test_est[test_est <0.5] <- 0
+test_error <- mean(test_est!= y.test)
+```
+
+K-NN Method:
+```{r}
+library(class)
+k <- c(1,3,5,7,15)
+y_hat = sapply(k,function(k){knn(x.train,rbind(x.train,x.test),y.train,k=k)})
+train_diff <- (y_hat[1:length(y.train),]>0.5) != y.train
+test_diff <- (y_hat[(length(y.train)+1):nrow(y_hat),]>0.5) != y.test
+train_err <- apply(train_diff,2,mean)
+test_err <- apply(test_diff,2,mean)
+
+#Combine all the errors into a dataframe
+error <- data.frame(k=k,"OLS train" =train_error,"OLS test"=test_error,
+                    "KNN train"=train_err,"KNN test"=test_err)
+print(error)
+
+```
+Plot the error curves:
+```{r}
+library(reshape2)
+error=melt(error,id="k")
+library(ggplot2)
+plt <- ggplot(error, aes(x=k,y=value,colour=variable))+
+  geom_line()+
+  labs(x="k",y="Error",title="OLS vs KNN")
+```
+```{r eval=FALSE}
+plt
+```
+(b)Solution:
+We cannot obtain the best subset selection result if we do not manipulate arguments of the function "regsubsets". Because we need to set "really.big=TRUE" if p >50. 
+
+(c)Solution: Even we have set "really.big=TRUE",due to combn(256,x) is too large. 
+
+(d)Solution: 
+```{r}
+library(leaps)
+subset = regsubsets(y=y.train,x=x.train,nvmax=3,really.big=T)
+coef(subset,3)
+```
+
+(e)Solution: 
+If we want to use forward method, we have to specify in the command: method ="forward". 
+```{r}
+#Model with 3 factors.
+subset_3 = regsubsets(y=y.train,x=x.train,nvmax=3,really.big=TRUE,method="forward")
+coef(subset_3,3)
+#Model with 9 factors.
+subset_9 = regsubsets(y=y.train,x=x.train,nvmax=9,really.big=TRUE,method="forward")
+coef(subset_9,9)
+```
+(f)Solution: 
+```{r}
+subset_256 <- regsubsets(y=y.train,x=x.train,nvmax=256,really.big=TRUE,method="forward")
+coef(subset_256,3)
+coef(subset_256,9)
+```
+From the result, we can see that using forward method, they are the same as using nvmax=3 or nvmax=
+(g)Solution:
+```{r}
+back_subset <- regsubsets(y=y.train,x=x.train,nvmax=256,really.big=TRUE,method="backward")
+coef(back_subset,3)
+coef(back_subset,9)
+```
+Compare with the foward method, the retained variables are different. Because the drop/add is based on previous variables and sequence matters. 
+
+(h) Solution:
+```{r}
+par(mfrow=c(2,2))
+forward_summary = summary(subset_256)
+rss <- forward_summary$rss
+adj_rsq <- forward_summary$adjr2
+cp <- forward_summary$cp
+bic <- forward_summary$bic
+plot(rss)
+plot(adj_rsq)
+points(which.max(adj_rsq),max(adj_rsq),col=2,cex=2)
+plot(cp)
+points(which.min(cp),min(cp),col=2,cex=2)
+plot(bic)
+points(which.min(bic),min(bic),col=2,cex=2)
+
+c(which.max(adj_rsq),which.min(cp),which.min(bic))
+```
+(i) Solution:
+```{r}
+par(mfrow=c(2,2))
+back_summary = summary(back_subset)
+back_rss <- back_summary$rss
+back_rsq <- back_summary$adjr2
+back_cp <- back_summary$cp
+back_bic <- back_summary$bic
+plot(back_rss)
+plot(back_rsq)
+points(which.max(back_rsq),max(back_rsq),col=2,cex=2)
+plot(back_cp)
+points(which.min(back_cp),min(back_cp),col=2,cex=2)
+plot(back_bic)
+points(which.min(back_bic),min(back_bic),col=2,cex=2)
+
+c(which.max(back_rsq),which.min(back_cp),which.min(back_bic))
+```
+(j) Solution: From the problem (h), we know that the best select for Cp is 75 BIC is 
+```{r}
+######CP##############################
+fwd_cp_coef <- forward_summary$which[75,]
+fwd_cp_coef[fwd_cp_coef==TRUE] <- coef(subset_256,75)
+y_train_cp = cbind(1,x.train)%*%fwd_cp_coef
+y_test_cp = cbind(1,x.test)%*%fwd_cp_coef
+# We can calculate the error 
+error_cp_train = mean((y_train_cp >=0.5)!=y.train)
+error_cp_test = mean((y_test_cp >=0.5)!=y.test)
+cp_error <- c(error_cp_train,error_cp_test)
+#####BIC###############################
+fwd_bic_coef <- forward_summary$which[34,]
+fwd_bic_coef[fwd_bic_coef==TRUE] <- coef(subset_256,34)
+y_train_bic = cbind(1,x.train)%*%fwd_bic_coef
+y_test_bic = cbind(1,x.test)%*%fwd_bic_coef
+
+error_bic_train = mean((y_train_bic >=0.5)!=y.train)
+error_bic_test = mean((y_test_bic >=0.5)!=y.test)
+bic_error <- c(error_bic_train,error_bic_test)
+forward_table = data.frame(c=c("cp","bic"),"cp" = cp_error,"bic"=bic_error)
+forward_table
+```
+(k) Solution:
+```{r}
+#####CP##############################
+bwd_cp_coef <- back_summary$which[89,]
+bwd_cp_coef[bwd_cp_coef==TRUE] <- coef(back_subset,89)
+y_train_bwd_cp = cbind(1,x.train)%*%bwd_cp_coef
+y_test_bwd_cp = cbind(1,x.test)%*%bwd_cp_coef
+# We can calculate the error 
+error_cp_bwd_train = mean((y_train_bwd_cp >=0.5)!=y.train)
+error_cp_bwd_test = mean((y_test_bwd_cp >=0.5)!=y.test)
+cp_bwd_error <- c(error_cp_bwd_train,error_cp_bwd_test)
+#####BIC###############################
+bwd_bic_coef <- back_summary$which[38,]
+bwd_bic_coef[bwd_bic_coef==TRUE] <- coef(back_subset,38)
+y_train_bwd_bic = cbind(1,x.train)%*%bwd_bic_coef
+y_test_bwd_bic = cbind(1,x.test)%*%bwd_bic_coef
+
+error_bic_bwd_train = mean((y_train_bwd_bic >=0.5)!=y.train)
+error_bic_bwd_test = mean((y_test_bwd_bic >=0.5)!=y.test)
+bic_bwd_error <- c(error_bic_bwd_train,error_bic_bwd_test)
+bwd_table = data.frame(c=c("cp","bic"),"cp" = cp_bwd_error,"bic"=bic_bwd_error)
+bwd_table
+```
+Using Cp as indicator, foward has larger train error and smaller test error. Using BIC, forward method has both smaller training and test error. Thus, I think foward BIC selection is the best. 
+
+(l) Solution: 
+```{r}
+library(glmnet)
+lambda.grid <- 10^seq(4,-3,length=100)
+ridge_reg <- glmnet(x.train,y.train,alpha=0,lambda=lambda.grid,standardize=FALSE)
+ridge_coef <- coef(ridge_reg)
+ridge_coef <-ridge_coef[-1,]
+ridge_coef <- data.frame(lambda=1:100, t(as.matrix(ridge_coef)))
+melt_coef <- melt(ridge_coef[,-2],id='lambda')
+
+plt <- ggplot(melt_coef, aes(x=lambda,y=value,colour=variable))+
+  geom_line()+
+  labs(x="lambda",y="coef",title="coef path of Ridge Regression")
+
+plt
+########we need to point out the variable. 
+num_rm <- which.min(ridge_coef[100,])
+revised_ridge_coef <- ridge_coef[,-num_rm]
+revised_melt_coef <- melt(revised_ridge_coef[,-2],id='lambda')
+plt_2 <- ggplot(revised_melt_coef, aes(x=lambda,y=value,colour=variable))+
+  geom_line()+
+  labs(x="lambda",y="coef",title="revised_coef path of Ridge Regression")
+plt_2
+```
+
+(m) Solution: 
+When $\lambda$ is equal to 0. We have: 
+```{r}
+ridge_0 <- glmnet(x.train,y.train,alpha=0,lambda=0,standardize=FALSE)
+coef_0 <- coef(ridge_0)
+train_0 <- cbind(1,x.train) %*% coef_0
+test_0 <- cbind(1,x.test) %*% coef_0
+
+mean((train_0 > 0.5)!= y.train)
+mean((test_0 > 0.5)!= y.train)
+```
+
+(n) Solution: 
+```{r}
+lm_coef <- coef(lm(y.train~x.train))
+lm_coef <- lm_coef[-1]
+coef_0 <-coef_0[-1]
+plot(coef_0,lm_coef)
+which.max(lm_coef)
+lm_coef <- lm_coef[-16]
+coef_0 <-coef_0[-16]
+plot(coef_0,lm_coef)
+```
+From the graph, we can see they are almost the same. 
+
+(o) Solution: 
+
+```{r}
+log_lambda <- log(lambda.grid)
+test_error <- matrix(NA,100,1)
+train_error <- matrix(NA,100,1)
+ridge_coef <- coef(ridge_reg)
+for (i in 1:100){
+  temp_train <- cbind(1,x.train)%*%ridge_coef[,i]
+  temp_test <- cbind(1,x.test)%*%ridge_coef[,i]
+  test_error[i,] <-mean((temp_test > 0.5)!= y.test)
+  train_error[i,] <-mean((temp_train > 0.5)!= y.train)
+  
+}
+
+error_to_plot <- data.frame(log_lambda,"train"=train_error,"test"=test_error)
+meshed_error_to_plot <- melt(error_to_plot,id="log_lambda")
+plt <- ggplot(meshed_error_to_plot,aes(x=log_lambda,y=value,color=variable))+
+  geom_line()+
+  labs(x="lambda",y="error")
+plt
+
+
+#The smallest training error occurs at:
+lambda.grid[which.min(train_error)]
+#Using this lambda, we will have the testing error:
+test_error[which.min(train_error)]
+train_error[which.min(train_error)]
+
+#The smallest testing error occurs at: 
+lambda.grid[which.min(test_error)]
+#test and training error are: 
+test_error[which.min(test_error)]
+train_error[which.min(test_error)]
+```
+We should use $\lambda$ =0.1555676, because the test error is lower and train error is acceptable. 
+
+(p) Solution: replace "ridge" by lasso. Here lambda =1
+```{r}
+lambda.grid <- 10^seq(0,-5,length=100)
+ridge_reg <- glmnet(x.train,y.train,alpha=1,lambda=lambda.grid,standardize=FALSE)
+ridge_coef <- coef(ridge_reg)
+ridge_coef <-ridge_coef[-1,]
+ridge_coef <- data.frame(lambda=1:100, t(as.matrix(ridge_coef)))
+melt_coef <- melt(ridge_coef[,-2],id='lambda')
+
+plt <- ggplot(melt_coef, aes(x=lambda,y=value,colour=variable))+
+  geom_line()+
+  labs(x="lambda",y="coef",title="coef path of Ridge Regression")
+
+plt
+########we need to point out the variable.
+num_rm <- which.max(ridge_coef[100,])
+###num_rm =33
+revised_ridge_coef <- ridge_coef[,-33]
+revised_ridge_coef <-data.frame("lambda"=1:100,"revised_ridge_coef"=revised_ridge_coef)
+revised_melt_coef <- melt(revised_ridge_coef[,-2],id='lambda')
+plt_2 <- ggplot(revised_melt_coef, aes(x=lambda,y=value,colour=variable))+
+  geom_line()+
+  labs(x="lambda",y="coef",title="revised_coef path of Ridge Regression")
+plt_2
+
+
+```
+
+(q)Solution: 
+```{r}
+ridge_0 <- glmnet(x.train,y.train,alpha=1,lambda=0,standardize=FALSE)
+coef_0 <- coef(ridge_0)
+train_0 <- cbind(1,x.train) %*% coef_0
+test_0 <- cbind(1,x.test) %*% coef_0
+
+mean((train_0 > 0.5)!= y.train)
+mean((test_0 > 0.5)!= y.test)
+```
+
+(r)Solution: 
+```{r}
+lm_coef <- coef(lm(y.train~x.train))
+lm_coef <- lm_coef[-1]
+coef_0 <-coef_0[-1]
+plot(coef_0,lm_coef)
+which.max(lm_coef)
+lm_coef <- lm_coef[-16]
+coef_0 <-coef_0[-16]
+plot(coef_0,lm_coef)
+lm(coef_0~lm_coef)
+```
+(s)Solution:
+```{r}
+log_lambda <- log(lambda.grid)
+test_error <- matrix(NA,100,1)
+train_error <- matrix(NA,100,1)
+ridge_coef <- coef(ridge_reg)
+for (i in 1:100){
+  temp_train <- cbind(1,x.train)%*%ridge_coef[,i]
+  temp_test <- cbind(1,x.test)%*%ridge_coef[,i]
+  test_error[i,] <-mean((temp_test > 0.5)!= y.test)
+  train_error[i,] <-mean((temp_train > 0.5)!= y.train)
+  
+}
+
+error_to_plot <- data.frame(log_lambda,"train"=train_error,"test"=test_error)
+meshed_error_to_plot <- melt(error_to_plot,id="log_lambda")
+plt <- ggplot(meshed_error_to_plot,aes(x=log_lambda,y=value,color=variable))+
+  geom_line()+
+  labs(x="lambda",y="error")
+plt
+
+
+#The smallest training error occurs at:
+lambda.grid[which.min(train_error)]
+#Using this lambda, we will have the testing error:
+test_error[which.min(train_error)]
+train_error[which.min(train_error)]
+
+#The smallest testing error occurs at: 
+lambda.grid[which.min(test_error)]
+#test and training error are: 
+test_error[which.min(test_error)]
+train_error[which.min(test_error)]
+```
+Since both of the lambda has similar test error, we should choose $\lambda=2.25702e-05$ that gives the smallest train error. 
+
+(t) Solution: 
+For each method, the OLS method has error =0.0412. KNN-1 gives the smallest error 0.0247. 
+The Ridge method gives 0.02472. The Lasso gives 0.03571. However, KNN-1 only uses the most nearest neighbour to forecast, which might be not easy to generalize and cast over-fitting. Thus, Ridge method is the best method. 
+
